@@ -19,10 +19,8 @@ import logging
 import yaml
 
 yaml_dict = yaml.load(open('Web/secret.yaml').read())
-user_name, password = yaml_dict['username'], yaml_dict['password']
+user_name, DBPASS = yaml_dict['username'], yaml_dict['password']
 
-# DBPASS = os.environ.get('DBPASS')
-DBPASS = "password"
 JST = timezone(timedelta(hours=+9), 'JST')
 commentbody = Value(ctypes.c_char_p, ''.encode())
 context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
@@ -32,7 +30,7 @@ context.load_cert_chain(certfile="/Web/server.pem", keyfile="/Web/server.key")
 def connect_socket():
     print("SocketStart")
     database = mydb.connect(
-        user='root',
+        user=user_name,
         passwd=DBPASS,
         host='mysql',
         port=3306,
@@ -116,7 +114,7 @@ class AuthLoginHandler(BaseHandler):
     def post(self):
         logging.debug("xsrf_cookie:" + self.get_argument("_xsrf", None))
         database = mydb.connect(
-            user='root',
+            user=user_name,
             passwd=DBPASS,
             host='mysql',
             port=3306,
@@ -144,7 +142,7 @@ class CommentHistory(BaseHandler):
     @web.authenticated
     def get(self):
         database = mydb.connect(
-            user='root',
+            user=user_name,
             passwd=DBPASS,
             host='mysql',
             port=3306,
@@ -168,7 +166,7 @@ class CommentHistory(BaseHandler):
 
 def send_comment(comment):
     database = mydb.connect(
-        user='root',
+        user=user_name,
         passwd=DBPASS,
         host='mysql',
         port=3306,
