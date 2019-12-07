@@ -18,68 +18,72 @@ import secrets
 import logging
 import yaml
 
-yaml_dict = yaml.load(open('Web/secret.yaml').read())
+# データベースの設定読み込み
+yaml_dict = yaml.load(open('Web/secret.yaml').read(), Loader=yaml.SafeLoader)
 user_name, DBPASS = yaml_dict['username'], yaml_dict['password']
 
+# JSTを設定
 JST = timezone(timedelta(hours=+9), 'JST')
 commentbody = Value(ctypes.c_char_p, ''.encode())
+# SocketのSSL設定
 context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
 context.load_cert_chain(certfile="/Web/server.pem", keyfile="/Web/server.key")
 
+# データベースの接続設定
+database = mydb.connect(
+    user=user_name,
+    passwd=DBPASS,
+    host='mysql',
+    port=3306,
+    db='PSS'
+)
+c = database.cursor()
 
-def connect_socket():
+
+def connect_socket():  # Socket通信
     print("SocketStart")
-    database = mydb.connect(
-        user=user_name,
-        passwd=DBPASS,
-        host='mysql',
-        port=3306,
-        db='PSS'
-    )
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('0.0.0.0', 10023))
-        s.listen(1)
+        s.bind(('0.0.0.0', 10023))  # ポート10023で開放
         while True:
-            try:
-                print("Waitng ....")
-                conn, addr = s.accept()
-                conn = context.wrap_socket(conn, server_side=3)
-                close = False
-                with conn:
-                    while not close:
-                        print("Connecting")
-                        data = conn.recv(1024).decode()
-                        if not data:
-                            break
-                        elif ":" in data:
-                            username = data.split(":")[0]
-                            userpass = data.split(":")[1]
-                            c = database.cursor()
-                            sql = "SELECT id, name, pass FROM users WHERE name = %s"
-                            c.execute(sql, (username,))
-                            userdata = c.fetchall()
-                            if len(userdata) > 0:
-                                if bcrypt.checkpw(userpass.encode(), userdata[0][2].encode()):
-                                    print("Connected")
-                                    conn.sendall("合致しました".encode("utf-8"))
-                                    while True:
-                                        comment = commentbody.value
-                                        with commentbody.get_lock():
-                                            commentbody.value = "".encode()
-                                        while not close and (len(comment) != 0):
-                                            print("send:" + str(comment))
-                                            conn.sendall(comment)
-                                            comment = ""
-                                else:
-                                    close = True
-                                    conn.sendall("認証エラー".encode("utf-8"))
-            except Exception as e:
-                print(e)
-                print("Disconnected")
-                pass
-            close = True
-        c.close()
-        database.close()
+            s.listen(1)
+            print("Waitng ....")
+            conn, addr = s.accept()
+            flg = False
+            while True:
+                try:
+                    conn = context.wrap_socket(conn, server_side=3)
+                    with conn:
+                        while True:
+                            try:
+                                print("Connecting")
+                                data = conn.recv(1024).decode()
+                                if not data:
+                                    break
+                                elif ":" in data:
+                                    loginuser = data.split(":")[0]
+                                    loginpass = data.split(":")[1]
+                                    sql = "SELECT id, name, pass FROM users WHERE name = %s"
+                                    c.execute(sql, (loginuser,))
+                                    userdata = c.fetchall()
+                                    if len(userdata) and bcrypt.checkpw(loginpass.encode(), userdata[0][2].encode()):
+                                        print("Connected")
+                                        conn.sendall("接続完了".encode("utf-8"))
+                                        flg = True
+                                        # while True:
+                                    else:
+                                        conn.sendall("認証エラー".encode("utf-8"))
+                                        conn.close()
+                                elif flg:
+                                    comment = commentbody.value
+                                    with commentbody.get_lock():
+                                        commentbody.value = "".encode()
+                                    if len(comment):
+                                        conn.sendall(comment)
+                                        comment = ""
+                            except socket.error:
+                                break
+                except Exception as e:
+                    print("Disconnected\n{}".format(e))
         s.close()
 
 
@@ -87,7 +91,6 @@ class BaseHandler(web.RequestHandler):
 
     def get_current_user(self):
         username = self.get_secure_cookie("user")
-        # logging.debug('BaseHandler - username: %s' % username)
         if not username:
             return None
         return tornado.escape.utf8(username)
@@ -113,13 +116,6 @@ class AuthLoginHandler(BaseHandler):
 
     def post(self):
         logging.debug("xsrf_cookie:" + self.get_argument("_xsrf", None))
-        database = mydb.connect(
-            user=user_name,
-            passwd=DBPASS,
-            host='mysql',
-            port=3306,
-            db='PSS'
-        )
         self.check_xsrf_cookie()
 
         username = self.get_argument("LoginName")
@@ -129,7 +125,6 @@ class AuthLoginHandler(BaseHandler):
             sql = "SELECT id, name, pass FROM users WHERE name = %s"
             c.execute(sql, (username,))
             userdata = c.fetchall()
-            c.close()
             if bcrypt.checkpw(password.encode(), userdata[0][2].encode()) and username == username:
                 self.set_secure_cookie("user", username)
                 self.set_current_user(username)
@@ -138,26 +133,19 @@ class AuthLoginHandler(BaseHandler):
                 self.write_error(403)
 
 
-class CommentHistory(BaseHandler):
+class CommentHistory(BaseHandler):  # コメントの履歴を表示(要ログイン)
     @web.authenticated
     def get(self):
-        database = mydb.connect(
-            user=user_name,
-            passwd=DBPASS,
-            host='mysql',
-            port=3306,
-            db='PSS'
-        )
         title = "コメント履歴"
+        # データベースから履歴を取得
         c = database.cursor()
         sql = "SELECT text, entertime FROM comment"
         c.execute(sql)
         comment_list = c.fetchall()
-        c.close()
         database.commit()
-        database.close()
         comment = [[None for i in range(2)]
                    for i in range(len(comment_list))]
+        # コメント一覧のリストを生成
         for i, x in enumerate(comment_list):
             comment[i][0] = x[0]
             comment[i][1] = x[1].strftime('%Y-%m-%d %H:%M:%S')
@@ -165,20 +153,13 @@ class CommentHistory(BaseHandler):
 
 
 def send_comment(comment):
-    database = mydb.connect(
-        user=user_name,
-        passwd=DBPASS,
-        host='mysql',
-        port=3306,
-        db='PSS'
-    )
+    # 現在時刻(JST)
     dt_now = dt.now(JST)
-    c = database.cursor()
+    # c = database.cursor()
     sql = "INSERT INTO comment (text, entertime) values(%s,%s)"
     c.execute(sql,
               (comment, dt_now,))
     database.commit()
-    commentbody.value = (comment).encode()
     with commentbody.get_lock():
         commentbody.value = comment.encode()
 
@@ -207,26 +188,33 @@ def main():
     asyncio.set_event_loop(asyncio.new_event_loop())
     BASE_DIR = os.path.dirname(__file__)
     token = secrets.token_hex()
+    # Tornadoの設定
     application = web.Application(
         [(r"/", MainHandler),
             (r"/Login", AuthLoginHandler), (r"/Logout", AuthLogoutHandler),
             (r"/Comment", Comment), (r"/CommentHistory", CommentHistory)],
+        # Webページテンプレートのディレクトリ
         template_path=os.path.join(BASE_DIR, 'templates'),
         cookie_secret=token,
+        # 静的ファイルのディレクトリ
         static_path=os.path.join(os.path.dirname(__file__), "static"),
         login_url="/Login",
         xsrf_cookies=True,
         autoescape="xhtml_escape")
+    # 鍵ファイル設定
     server = httpserver.HTTPServer(application, ssl_options={
         'certfile': 'server.pem',
         'keyfile': 'server.key'
     })
+    # ポート5000
     server.listen(5000, '0.0.0.0')
     ioloop.IOLoop.instance().start()
 
 
 if __name__ == '__main__':
+    # Webアプリケーション部分
     thread1 = Thread(target=main)
+    # ソケット通信部分
     thread2 = Thread(target=connect_socket)
 
     thread1.start()
