@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}PSS | TOP{% end %}
+{% block content %}
+<div class="uk-margin-large-left uk-width-1-2@s uk-margin-small">
+    <form action="/Comment" method="post">
+        <label class="">
+            <h3 class="">コメント入力フォーム</h3>
+            <input type="text" name="comment" id="comment", class="uk-input">
+        </label>
+        {% raw xsrf_form_html() %}
+    </form>
+</div>
+{% end %}

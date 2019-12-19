@@ -18,5 +18,5 @@ ADD . /Web
 #RUN openssl req -nodes -newkey rsa:2048 -keyout server.key -out server.csr -subj "/C=JP/ST=Tokyo/L=Tokyo/O=N INC./OU=IT Department/CN=seigo2016.com" && openssl x509 -req -days 3650 -in server.csr -signkey server.key -out server.crt
 ADD ./fullchain.pem /Web/server.pem
 ADD ./privkey.pem /Web/server.key
-CMD ["python3","-u","Web/init_pass.py"]
+CMD ["python3","Web/init_pass.py"]
 CMD ["python3","-u","Web/main.py"]

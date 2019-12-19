@@ -1,34 +1,19 @@
-<!DOCTYPE html>
-<html lang="ja">
-
-<head>
-        <meta charset="utf-8">
-        <meta http-equiv="X-UA-Compatible" content="IE=edge">
-        <title>{{ title }}</title>
-        <!-- <link href="/static/css/bootstrap.min.css" rel="stylesheet">
-        <link href="/static/css/style.css" rel="stylesheet">
-        <script src="/static/js/main.js"></script> -->
-</head>
-
-<body class="bg-light">
-        <div class="main">
-                <form action="/Login" method="post">
-                        <label class="">
-                                <p class="">ID</p>
-                                <input type="text" name="LoginName" id="LoginName">
-                        </label>
-                        <label class="">
-                                <p class="">PassWord</p>
-                                <input type="text" name="LoginPass" id="LoginPass">
-                        </label>
-                        <button type="submit">ログイン</button>
-                        {% raw xsrf_form_html() %}
-                </form>
-                <p>{{message}}</p>
-        </div>
-        <!-- <script src="/static/js/jquery-3-4-1.min.js"></script>
-        <script src="/static/js/bootstrap.min.js"></script>
-        <script src="/static/js/bootstrap-arrows.js"></script> -->
-</body>
-
-</html>
+{% extends "base.html" %}
+{% block title %}PSS | TOP{% end %}
+{% block content %}
+<div class="uk-margin-large-left">
+    <form action="/Login" method="post">
+        <label class="">
+            <h3 class="">ID</h3>
+            <input class="uk-input uk-width-1-2@s" type="text" name="LoginName" id="LoginName">
+        </label>
+        <label class="">
+            <h3 class="">PassWord</h3>
+            <input class="uk-input uk-width-1-2@s" type="password" name="LoginPass" id="LoginPass">
+        </label>
+        <button class="uk-margin-small uk-button uk-button-default" type="submit">ログイン</button>
+	<h4 class="uk-margin-remove-vertical">{{message}}</h4>
+        {% raw xsrf_form_html() %}
+    </form>
+</div>
+{% end %}

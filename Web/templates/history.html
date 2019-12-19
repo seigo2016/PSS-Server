@@ -1,23 +1,17 @@
-<!DOCTYPE html>
-<html lang="ja">
-
-<head>
-        <meta charset="utf-8">
-        <meta http-equiv="X-UA-Compatible" content="IE=edge">
-        <title>{{ title }}</title>
-        <!-- <link href="/static/css/bootstrap.min.css" rel="stylesheet">
-        <link href="/static/css/style.css" rel="stylesheet">
-        <script src="/static/js/main.js"></script> -->
-</head>
-
-<body class="bg-light">
-        <div class="main">
-                <p>{{message}}</p>
-                {% raw xsrf_form_html() %}
-        </div>
-        <!-- <script src="/static/js/jquery-3-4-1.min.js"></script>
-        <script src="/static/js/bootstrap.min.js"></script>
-        <script src="/static/js/bootstrap-arrows.js"></script> -->
-</body>
-
-</html>
+{% extends "base.html" %}
+{% block title %}PSS | TOP{% end %}
+{% block content %}
+<div class="uk-margin-xlarge-right uk-margin-large-left uk-margin-remove-top">
+	<script>
+		let data = '<table class="uk-table uk-table-divider"><thead><tr><th>id</th><th>date</th><th>comment</th></tr></thead><tbody>'	
+raw_data = {% raw message %};
+for(let i=0;i<raw_data.length;i++){
+	//raw_data[i] = JSON.stringify(raw_data[i]) 
+	body = JSON.parse(raw_data[i]);
+	data += '<tr> <td>' + (i+1) + '</td> <td>' + body["date"] + '</td> <td>' + body["text"] + '</td> </tr>'
+}
+data += '</tbody> </table>'
+document.write(data)
+	</script>
+</div>
+{% end %}

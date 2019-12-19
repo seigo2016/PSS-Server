@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}PSS | DashBoard{% end %}
+{% block content %}
+<div class="uk-container uk-margin-large-left uk-margin-medium-top uk-grid-match uk-grid">
+    <div>
+        <a href="/CommentHistory"
+            class="uk-margin-small uk-margin-remove-right uk-display-block uk-card uk-card-body uk-card-default uk-link-toggle uk-width-medium">
+            <h3 class="uk-card-title"><span class="uk-link-heading">コメント履歴</span></h3>
+        </a>
+    </div>
+    <div>
+        <a href="/AccountSetting"
+            class="uk-margin-small uk-margin-remove-right uk-display-block uk-card uk-card-body uk-card-default uk-link-toggle uk-width-medium">
+            <h3 class="uk-card-title"><span class="uk-link-heading">アカウント設定</span></h3>
+        </a>
+    </div>
+    <div>
+        <a href="/Logout"
+            class="uk-margin-small uk-margin-remove-right uk-display-block uk-card uk-card-body uk-card-default uk-link-toggle uk-width-medium">
+            <h3 class="uk-card-title"><span class="uk-link-heading">ログアウト</span></h3>
+        </a>
+    </div>
+</div>
+{% end %}
