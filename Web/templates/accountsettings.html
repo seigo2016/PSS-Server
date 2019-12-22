@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}PSS | TOP{% end %}
+{% block content %}
+<div class="uk-width-1-2@s uk-margin-large-left uk-margin-small">
+    <form action="/AccountSettings" method="post">
+        <label class="">
+            <h3 class="">現在のパスワードを入力</h3>
+            <input type="password" name="current_password" id="current_password" , class="uk-input">
+        </label>
+        <label class="">
+            <h3 class="">新しいパスワードを入力</h3>
+            <input type="password" name="new_password" id="new_password" , class="uk-input">
+        </label>
+        <button class="uk-margin-small uk-button uk-button-default" type="submit">パスワード変更</button>
+        <label>
+            <h3>{{message}}</h3>
+        </label>
+        {% raw xsrf_form_html() %}
+    </form>
+</div>
+{% end %}
