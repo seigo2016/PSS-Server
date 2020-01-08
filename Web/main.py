@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 from threading import Thread  # 並列処理
 from multiprocessing import Value  # スレッド間での値の共有
 import ctypes  # スレッド間での値を共有する際の型指定
@@ -18,6 +17,8 @@ import os  # パス取得用
 import yaml  # データベース等の設定をyamlから取得
 import logging  # ログ取得
 import time
+import json
+
 
 def connect_socket():  # Socket通信
     global is_connected
@@ -29,60 +30,59 @@ def connect_socket():  # Socket通信
             logging.info("Waitng ....")
             is_connected = False
             conn, addr = s.accept()
-            while True:
-                try:
-                    conn = context.wrap_socket(conn, server_side=3)
-                    with conn:
-                        logging.info("Connecting")
-                        while True:
-                            try:
-                                data = conn.recv(1024).decode()
-                                if not data:
-                                    break
-                                elif ":" in data:  # 認証データ受け取り
-                                    c = database.cursor()
-                                    loginuser = data.split(":")[0]
-                                    loginpass = data.split(":")[1]
-                                    # ユーザーをデータベースで検索
-                                    sql = "SELECT id, name, pass FROM users WHERE name = %s"
-                                    c.execute(sql, (loginuser,))
-                                    userdata = c.fetchall()
-                                    c.close()
-                                    # パスワードを検証
-                                    auth_result = bcrypt.checkpw(
-                                        loginpass.encode(),
-                                        userdata[0][2].encode()
-                                    )
-                                    # 認証成功時
-                                    if len(userdata) and auth_result:
-                                        logging.info("Connected")
-                                        conn.sendall(
-                                            "接続完了".encode("utf-8"))
-                                        is_connected = True
-                                    # 認証失敗時
-                                    else:
-                                        print("Auth error")
-                                        conn.sendall(
-                                            "認証エラー".encode("utf-8"))
-                                        conn.close()
-                                        break
-                                # 認証後コメント送信
-                                elif is_connected:
+            conn = context.wrap_socket(
+                conn,
+                server_side=True)
+            with conn:
+                logging.info("Connecting")
+                while True:
+                    try:
+                        data = conn.recv(1024).decode()
+                        print(data)
+                        if not data and not is_connected:
+                            break
+                        elif "password" in data and "username" in data:  # 認証データ受け取り
+                            data = json.loads(data)
+                            c = database.cursor()
+                            loginuser = data['username']
+                            loginpass = data['password']
+                            print(loginuser)
+                            # ユーザーをデータベースで検索
+                            sql = "SELECT id, name, pass FROM users WHERE name = %s"
+                            c.execute(sql, (loginuser,))
+                            userdata = c.fetchall()
+                            c.close()
+                            auth_result = False
+                            # パスワードを検証
+                            if len(userdata):
+                                auth_result = bcrypt.checkpw(
+                                    loginpass.encode(),
+                                    userdata[0][2].encode()
+                                )
+                            # 認証成功時
+                            if len(userdata) and auth_result:
+                                logging.info("Connected")
+                                conn.sendall("接続完了".encode("utf-8"))
+                                is_connected = True
+                                while True:
                                     comment = commentbody.value
-                                    print(comment)
                                     with commentbody.get_lock():
                                         commentbody.value = "".encode()
                                     if len(comment):
                                         conn.sendall(comment)
                                         comment = ""
-                            # 切断時
-                            except socket.error:
-                                logging.info(f"Disconnected")
+                                    else:
+                                        conn.sendall("PING".encode())
+                            # 認証失敗時
+                            else:
+                                conn.sendall("認証エラー".encode("utf-8"))
+                                conn.close()
                                 break
-                except Exception as e:
-                    logging.warning(f'{e}')
-                    break
-            conn.close()
+                    # 切断時
+                    except socket.error:
+                        logging.info("Disconnected")
+                        break
+        conn.close()
 
 
 class BaseHandler(web.RequestHandler):  # ユーザーセッション
@@ -93,8 +93,7 @@ class BaseHandler(web.RequestHandler):  # ユーザーセッション
         return tornado.escape.utf8(username)
 
     def set_current_user(self, username):  # 現在のユーザーを設定
-        self.set_secure_cookie("user",
-                               tornado.escape.utf8(username))
+        self.set_secure_cookie("user", tornado.escape.utf8(username))
 
     def clear_current_user(self):  # 現在のユーザーをクリア
         self.clear_cookie("user")
@@ -231,13 +230,11 @@ def send_comment(comment):
 class Comment(web.RequestHandler):  # コメント入力フォーム
     def post(self):
         comment = self.get_argument("comment")
-        # エスケープ
         comment = escape(comment)
         title = "PSS | Comment"
-        # コメント文字数制限(30)
         if len(comment) < 30:
             send_comment(comment)
-            self.render('comment.html', title=title)
+            self.render('comment.html', title=title, message=None)
         else:
             message = "正しく入力してください"
             self.render('comment.html', title=title, message=message)
@@ -263,7 +260,6 @@ def webapp_main():
     asyncio.set_event_loop(asyncio.new_event_loop())
     BASE_DIR = os.getcwd()
     token = secrets.token_hex()
-    # Tornadoの設定
     application = web.Application(
         [(r"/", MainHandler),
          (r"/Login", AuthLoginHandler),
@@ -307,9 +303,11 @@ if __name__ == '__main__':
     JST = timezone(timedelta(hours=+9), 'JST')
     commentbody = Value(ctypes.c_char_p, ''.encode())
     # SocketのSSL化
-    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    context.load_cert_chain(certfile="/Web/server.pem",
-                            keyfile="/Web/server.key")
+    context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+    context.load_cert_chain(
+        certfile="/Web/keyfile/server.crt",
+        keyfile="/Web/keyfile/server.key"
+    )
     is_connected = False
     # データベースの接続設定
     database = mydb.connect(

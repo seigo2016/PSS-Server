@@ -1,3 +1,6 @@
 *.pem
 *.yaml
-
+*.key
+*.crt
+*.csr
+keyfile/
