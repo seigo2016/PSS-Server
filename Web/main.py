@@ -30,15 +30,15 @@ def connect_socket():  # Socket通信
             logging.info("Waitng ....")
             is_connected = False
             conn, addr = s.accept()
-            conn = context.wrap_socket(
-                conn,
-                server_side=True)
+            try:
+                conn = context.wrap_socket(conn, server_side=True)
+            except ssl.SSLError:
+                continue
             with conn:
                 logging.info("Connecting")
                 while True:
                     try:
                         data = conn.recv(1024).decode()
-                        print(data)
                         if not data and not is_connected:
                             break
                         elif "password" in data and "username" in data:  # 認証データ受け取り
@@ -46,7 +46,6 @@ def connect_socket():  # Socket通信
                             c = database.cursor()
                             loginuser = data['username']
                             loginpass = data['password']
-                            print(loginuser)
                             # ユーザーをデータベースで検索
                             sql = "SELECT id, name, pass FROM users WHERE name = %s"
                             c.execute(sql, (loginuser,))

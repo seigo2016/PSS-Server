@@ -3,15 +3,15 @@
 {% block content %}
 <div class="uk-margin-xlarge-right uk-margin-large-left uk-margin-remove-top">
 	<script>
-		let data = '<table class="uk-table uk-table-divider"><thead><tr><th>id</th><th>date</th><th>comment</th></tr></thead><tbody>'	
-raw_data = {% raw message %};
-for(let i=0;i<raw_data.length;i++){
-	//raw_data[i] = JSON.stringify(raw_data[i]) 
-	body = JSON.parse(raw_data[i]);
-	data += '<tr> <td>' + (i+1) + '</td> <td>' + body["date"] + '</td> <td>' + body["text"] + '</td> </tr>'
-}
-data += '</tbody> </table>'
-document.write(data)
+		let data = '<table class="uk-table uk-table-divider"><thead><tr><th>id</th><th>date</th><th>comment</th></tr></thead><tbody>'
+		raw_data = {% raw message %};
+		for (let i = 0; i < raw_data.length; i++) {
+			//raw_data[i] = JSON.stringify(raw_data[i]) 
+			body = JSON.parse(raw_data[i]);
+			data += '<tr> <td>' + (i + 1) + '</td> <td>' + body["date"] + '</td> <td>' + body["text"] + '</td> </tr>'
+		}
+		data += '</tbody> </table>'
+		document.write(data)
 	</script>
 </div>
 {% end %}
