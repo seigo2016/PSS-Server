@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from threading import Thread  # 並列処理
-from multiprocessing import Value  # スレッド間での値の共有
-import ctypes  # スレッド間での値を共有する際の型指定
+from multiprocessing import Manager  # スレッド間での値の共有
 import asyncio  # 非同期処理
 import mysql.connector as mydb  # データベース接続用
 import bcrypt  # ログインパスワードのハッシュ化・検証
@@ -20,13 +19,36 @@ import time
 import json
 
 
+def loop_handler():
+    global commentbody
+    while True:
+        comment = commentbody
+        commentbody = []
+        try:
+            if not len(comment):
+                for i in clients:
+                    i[0].sendall("PING".encode())
+                continue
+            for i in clients:
+                conn = i[0]
+                if not comment[1] in i:
+                    continue
+                conn.sendall(comment[0])
+                print("send: " + str(comment[0]))
+                comment = []
+                break
+        except socket.error:
+            logging.info("Disconnected")
+            break
+
+
 def connect_socket():  # Socket通信
     global is_connected
     logging.info("SocketStart")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('0.0.0.0', 10023))  # ポート10023で開放
         while True:
-            s.listen(1)  # 接続待ち
+            s.listen(5)  # 接続待ち
             logging.info("Waitng ....")
             is_connected = False
             conn, addr = s.accept()
@@ -34,54 +56,59 @@ def connect_socket():  # Socket通信
                 conn = context.wrap_socket(conn, server_side=True)
             except ssl.SSLError:
                 continue
-            with conn:
-                logging.info("Connecting")
-                while True:
-                    try:
-                        data = conn.recv(1024).decode()
-                        if not data and not is_connected:
-                            break
-                        elif "password" in data and "username" in data:  # 認証データ受け取り
-                            data = json.loads(data)
-                            c = database.cursor()
-                            loginuser = data['username']
-                            loginpass = data['password']
-                            # ユーザーをデータベースで検索
-                            sql = "SELECT id, name, pass FROM users WHERE name = %s"
-                            c.execute(sql, (loginuser,))
-                            userdata = c.fetchall()
-                            c.close()
-                            auth_result = False
-                            # パスワードを検証
-                            if len(userdata):
-                                auth_result = bcrypt.checkpw(
-                                    loginpass.encode(),
-                                    userdata[0][2].encode()
-                                )
-                            # 認証成功時
-                            if len(userdata) and auth_result:
-                                logging.info("Connected")
-                                conn.sendall("接続完了".encode("utf-8"))
-                                is_connected = True
-                                while True:
-                                    comment = commentbody.value
-                                    with commentbody.get_lock():
-                                        commentbody.value = "".encode()
-                                    if len(comment):
-                                        conn.sendall(comment)
-                                        comment = ""
-                                    else:
-                                        conn.sendall("PING".encode())
-                            # 認証失敗時
-                            else:
-                                conn.sendall("認証エラー".encode("utf-8"))
-                                conn.close()
-                                break
-                    # 切断時
-                    except socket.error:
-                        logging.info("Disconnected")
+            # with conn:
+            logging.info("Connecting")
+            while True:
+                data = conn.recv(1024).decode()
+                try:
+                    if not data and not is_connected:
                         break
-        conn.close()
+                    elif "password" in data and "username" in data:  # 認証データ受け取り
+                        data = json.loads(data)
+                        c = database.cursor()
+                        loginuser = data['username']
+                        loginpass = data['password']
+                        # ユーザーをデータベースで検索
+                        sql = "SELECT id, name, pass FROM users WHERE name = %s"
+                        c.execute(sql, (loginuser,))
+                        userdata = c.fetchall()
+                        c.close()
+                        auth_result = False
+                        # パスワードを検証
+                        if not len(userdata):
+                            break
+                        auth_result = bcrypt.checkpw(
+                            loginpass.encode(),
+                            userdata[0][2].encode()
+                        )
+                        # 認証成功時
+                        if len(userdata) and auth_result:
+                            logging.info("Connected")
+                            conn.send("接続完了".encode("utf-8"))
+                            clients.append((
+                                conn, addr, secrets.token_urlsafe()))
+                        # 認証失敗時
+                        else:
+                            conn.send("認証エラー".encode("utf-8"))
+                            conn.close()
+                            break
+
+                # 切断時
+                except socket.error:
+                    logging.info("Disconnected")
+                    break
+
+
+def send_comment(comment, token):
+    global commentbody
+    # 現在時刻(JST)
+    dt_now = dt.now(JST)
+    c = database.cursor()
+    sql = "INSERT INTO comment (text, entertime) values(%s,%s)"
+    c.execute(sql, (comment, dt_now,))
+    database.commit()
+    commentbody = [comment.encode(), token]
+    c.close()
 
 
 class BaseHandler(web.RequestHandler):  # ユーザーセッション
@@ -213,39 +240,45 @@ class DashBoard(BaseHandler):
         self.render('dashboard.html', title=title)
 
 
-def send_comment(comment):
-    # 現在時刻(JST)
-    dt_now = dt.now(JST)
-    c = database.cursor()
-    sql = "INSERT INTO comment (text, entertime) values(%s,%s)"
-    c.execute(sql,
-              (comment, dt_now,))
-    database.commit()
-    with commentbody.get_lock():
-        commentbody.value = comment.encode()
-    c.close()
-
-
 class Comment(web.RequestHandler):  # コメント入力フォーム
     def post(self):
-        comment = self.get_argument("comment")
-        comment = escape(comment)
-        title = "PSS | Comment"
-        if len(comment) < 30:
-            send_comment(comment)
-            self.render('comment.html', title=title, message=None)
-        else:
-            message = "正しく入力してください"
-            self.render('comment.html', title=title, message=message)
+        cl = self.get_argument("token")
+        for i in clients:
+            if not (cl in i):
+                continue
+            comment = self.get_argument("comment")
+            comment = escape(comment)
+            title = "PSS | Comment"
+            if len(comment) < 30:
+                send_comment(comment, cl)
+                self.redirect(f'/Comment?cl={cl}')
+            else:
+                token = cl
+                message = "正しく入力してください"
+                self.render('comment.html', title=title,
+                            message=message, token=token)
 
     def get(self):
-        if is_connected:  # プレゼンテーターのPCが接続しているか
-            title = "PSS | コメント入力"
-            self.render('comment.html', title=title)
-        else:
+        cl = self.get_query_argument("cl")
+        find = False
+        for i in clients:
+            if cl in i:
+                title = "PSS | コメント入力"
+                find = True
+                self.render('comment.html', title=title, message="", token=cl)
+        if not find:
             title = "PSS | コメント入力"
             self.render('comment_stop.html', title=title,
-                        message="現在コメント可能なプレゼンテーションはありません")
+                        message="NOT FOUND")
+
+
+class ClientList(web.RequestHandler):
+    def get(self):
+        title = "PSS | クライアント一覧"
+        clients_list = []
+        for i in clients:
+            clients_list.append(i[2])
+        self.render('list.html', title=title, clients_list=clients_list)
 
 
 class MainHandler(web.RequestHandler):  # トップページ
@@ -267,6 +300,7 @@ def webapp_main():
          (r"/DashBoard", DashBoard),
          (r"/CommentHistory", CommentHistory),
          (r"/AccountSettings", AccountSettings),
+         (r"/ClientList", ClientList),
          (r'/(favicon.ico)', tornado.web.StaticFileHandler, {"url": "/static/favicon.png"})],
         template_path=os.path.join(BASE_DIR, 'Web/templates'),
         cookie_secret=token,
@@ -294,13 +328,15 @@ def db_ping():
 
 
 if __name__ == '__main__':
+    clients = []
+    manager = Manager()
+    commentbody = manager.list()
     # データベースの設定(ユーザー名・パスワード)読み込み
     yaml_dict = yaml.load(open('Web/secret.yaml').read(),
                           Loader=yaml.SafeLoader)
     user_name, DBPASS = yaml_dict['username'], yaml_dict['password']
     # タイムゾーンをJSTに設定
     JST = timezone(timedelta(hours=+9), 'JST')
-    commentbody = Value(ctypes.c_char_p, ''.encode())
     # SocketのSSL化
     context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
     context.load_cert_chain(
@@ -322,6 +358,8 @@ if __name__ == '__main__':
     # ソケット通信スレッド
     thread2 = Thread(target=connect_socket)
     thread3 = Thread(target=db_ping)
+    thread4 = Thread(target=loop_handler)
     thread1.start()
     thread2.start()
     thread3.start()
+    thread4.start()

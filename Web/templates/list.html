@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}PSS | TOP{% end %}
+{% block content %}
+<div class="uk-margin-large-left uk-width-1-2@s uk-margin-small">
+    {% for client in clients_list %}
+    {% block client %}
+    <h3><a class="uk-link-heading" href="/Comment?cl={{client}}">プレゼンテーター</a></h3>
+    {% end %}
+    {% end %}
+</div>
+{% end %}

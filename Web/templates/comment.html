@@ -5,7 +5,8 @@
     <form action="/Comment" method="post">
         <label class="">
             <h3 class="">コメント入力フォーム</h3>
-            <input type="text" name="comment" id="comment", class="uk-input">
+            <input type="text" name="comment" id="comment" class="uk-input">
+            <input type="hidden" name="token" id="token" value="{{token}}">
         </label>
         {% raw xsrf_form_html() %}
     </form>
