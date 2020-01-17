@@ -21,24 +21,25 @@ import json
 
 def loop_handler():
     global commentbody
+    global clients
     while True:
         comment = commentbody
         commentbody = []
-        try:
-            if not len(comment):
-                for i in clients:
-                    i[0].sendall("PING".encode())
-                continue
+        if not len(comment):
             for i in clients:
-                conn = i[0]
-                if not comment[1] in i:
-                    continue
-                conn.sendall(comment[0])
-                print("send: " + str(comment[0]))
-                comment = []
-                break
-        except socket.error:
-            logging.info("Disconnected")
+                try:
+                    i[0].sendall("PING".encode())
+                except socket.error:
+                    clients = [j for j in clients if j[0] != i[0]]
+                    logging.info("Disconnected")
+            continue
+        for i in clients:
+            conn = i[0]
+            if not comment[1] in i:
+                continue
+            conn.sendall(comment[0])
+            print("send: " + str(comment[0]))
+            comment = []
             break
 
 
@@ -56,6 +57,8 @@ def connect_socket():  # Socket通信
                 conn = context.wrap_socket(conn, server_side=True)
             except ssl.SSLError:
                 continue
+            except Exception as e:
+                print(e)
             # with conn:
             logging.info("Connecting")
             while True:
@@ -105,7 +108,7 @@ def send_comment(comment, token):
     dt_now = dt.now(JST)
     c = database.cursor()
     sql = "INSERT INTO comment (text, entertime) values(%s,%s)"
-    c.execute(sql, (comment, dt_now,))
+    c.execute(sql, (comment.encode('utf-8'), dt_now,))
     database.commit()
     commentbody = [comment.encode(), token]
     c.close()
@@ -259,17 +262,20 @@ class Comment(web.RequestHandler):  # コメント入力フォーム
                             message=message, token=token)
 
     def get(self):
-        cl = self.get_query_argument("cl")
+        cl = self.get_query_argument("cl", default=0)
         find = False
-        for i in clients:
-            if cl in i:
+        if cl == 0:
+            self.redirect('/ClientList')
+        else:
+            for i in clients:
+                if not (cl in i):
+                    continue
                 title = "PSS | コメント入力"
                 find = True
                 self.render('comment.html', title=title, message="", token=cl)
         if not find:
             title = "PSS | コメント入力"
-            self.render('comment_stop.html', title=title,
-                        message="NOT FOUND")
+            self.render('comment_stop.html', title=title, message="NOT FOUND")
 
 
 class ClientList(web.RequestHandler):
