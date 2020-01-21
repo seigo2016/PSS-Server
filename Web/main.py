@@ -58,7 +58,7 @@ def connect_socket():  # Socket通信
             except ssl.SSLError:
                 continue
             except Exception as e:
-                print(e)
+                logging.error(e)
             # with conn:
             logging.info("Connecting")
             while True:
@@ -73,23 +73,25 @@ def connect_socket():  # Socket通信
                         loginpass = data['password']
                         # ユーザーをデータベースで検索
                         sql = "SELECT id, name, pass FROM users WHERE name = %s"
-                        c.execute(sql, (loginuser,))
+                        c.execute(sql, (loginuser.encode('utf-8'),))
                         userdata = c.fetchall()
                         c.close()
                         auth_result = False
                         # パスワードを検証
                         if not len(userdata):
                             break
-                        auth_result = bcrypt.checkpw(
-                            loginpass.encode(),
-                            userdata[0][2].encode()
-                        )
+                        auth_result = bcrypt.checkpw(loginpass.encode(), userdata[0][2].encode())
                         # 認証成功時
                         if len(userdata) and auth_result:
                             logging.info("Connected")
                             conn.send("接続完了".encode("utf-8"))
-                            clients.append((
-                                conn, addr, secrets.token_urlsafe()))
+                            token = secrets.token_urlsafe(8)
+                            c = database.cursor()
+                            sql = "INSERT INTO presentations (presentation_id, username) values(%s,%s)"
+                            c.execute(sql, (token.encode('utf-8'), loginuser.encode('utf-8')))
+                            database.commit()
+                            c.close()
+                            clients.append((conn, addr, token))
                         # 認証失敗時
                         else:
                             conn.send("認証エラー".encode("utf-8"))
@@ -104,11 +106,10 @@ def connect_socket():  # Socket通信
 
 def send_comment(comment, token):
     global commentbody
-    # 現在時刻(JST)
-    dt_now = dt.now(JST)
+    dt_now = dt.now()
     c = database.cursor()
-    sql = "INSERT INTO comment (text, entertime) values(%s,%s)"
-    c.execute(sql, (comment.encode('utf-8'), dt_now,))
+    sql = "INSERT INTO comments (text, entertime, presentation_id) values(%s,%s,%s)"
+    c.execute(sql, (comment.encode('utf-8'), dt_now, token.encode('utf-8')))
     database.commit()
     commentbody = [comment.encode(), token]
     c.close()
@@ -148,13 +149,12 @@ class AuthLoginHandler(BaseHandler):  # ログイン処理
             c = database.cursor()
             # ユーザーをデータベースで検索
             sql = "SELECT id, name, pass FROM users WHERE name = %s"
-            c.execute(sql, (username,))
+            c.execute(sql, (username.encode('utf-8'),))
             userdata = c.fetchall()
             c.close()
             if len(userdata):
                 try:  # 認証成功
-                    auth = bcrypt.checkpw(
-                        password.encode(), userdata[0][2].encode())
+                    auth = bcrypt.checkpw(password.encode(), userdata[0][2].encode())
                     auth = True
                 except ValueError:  # 認証失敗
                     auth = False
@@ -164,13 +164,11 @@ class AuthLoginHandler(BaseHandler):  # ログイン処理
                     self.redirect("/DashBoard")
                 else:  # 認証失敗時(パスワードが違う場合)
                     logging.info("AuthError")
-                    self.render('login.html', title="ログイン",
-                                message="IDかパスワードが違います")
+                    self.render('login.html', title="ログイン", message="IDかパスワードが違います")
             # 認証失敗時(ユーザー自体が登録されていない場合)
             else:
                 logging.info("User not found")
-                self.render('login.html', title="ログイン",
-                            message="IDかパスワードが違います")
+                self.render('login.html', title="ログイン", message="IDかパスワードが違います")
         # 入力されていないとき
         else:
             logging.info("ID or PassWord is Null")
@@ -182,57 +180,61 @@ class CommentHistory(BaseHandler):  # コメントの履歴を表示(要ログ�
     def get(self):
         title = "コメント履歴"
         # データベースから履歴を取得
+        comment_list = []
         c = database.cursor()
-        sql = "SELECT text, entertime FROM comment"
-        c.execute(sql)
-        comment_list = c.fetchall()
+        username = self.get_current_user().decode()
+        sql = "SELECT presentation_id FROM presentations WHERE username = %s"
+        c.execute(sql, (username.encode('utf-8'),))
+        presentation_list = c.fetchall()
+        for i in presentation_list:
+            sql = "SELECT text, entertime FROM comments WHERE presentation_id = %s"
+            c.execute(sql, (i[0].encode('utf-8'),))
+            comment_list.append(c.fetchall())
         database.commit()
         c.close()
-        comment = [[None for i in range(2)]
-                   for i in range(len(comment_list))]
+        comment = []
         # コメント一覧を生成(json)
         for i, x in enumerate(comment_list):
-            comment[i] = {'date': x[1].strftime(
-                '%Y-%m-%d %H:%M:%S'), 'text': x[0]}
-            comment[i] = tornado.escape.json_encode(comment[i])
+            if len(x):
+                x = x[0]
+                comment_tmp = {'date': x[1].strftime('%Y-%m-%d %H:%M:%S'), 'text': x[0]}
+                comment.append(tornado.escape.json_encode(comment_tmp))
         self.render('history.html', title=title, message=comment)
 
 
-class AccountSettings(BaseHandler):
+class ChangePassword(BaseHandler):
     @web.authenticated
     def get(self):
-        title = "PSS | AccountSettings"
-        self.render('accountsettings.html', title=title, message="")
+        title = "PSS | ChangePassword"
+        self.render('changepassword.html', title=title, message="")
 
     def post(self):
         logging.debug("xsrf_cookie:" + self.get_argument("_xsrf", None))
         self.check_xsrf_cookie()
         current_password = self.get_argument("current_password")
         new_password = self.get_argument("new_password")
-        username = self.get_current_user()
+        username = self.get_current_user().decode()
         if len(current_password) and len(new_password):
             c = database.cursor()
             # ユーザーをデータベースで検索
             sql = "SELECT id, name, pass FROM users WHERE name = %s"
-            c.execute(sql, (username,))
+            c.execute(sql, (username.encode('utf-8'),))
             userdata = c.fetchall()
             # 認証成功時
             if bcrypt.checkpw(current_password.encode(), userdata[0][2].encode()):
                 sql = "UPDATE users SET pass = %s WHERE name = %s"
                 salt = bcrypt.gensalt(rounds=10, prefix=b'2a')
-                hashed_password = bcrypt.hashpw(new_password.encode(), salt)
-                c.execute(sql, (hashed_password, username,))
+                hashed_password = bcrypt.hashpw(new_password.encode(), salt).decode()
+                c.execute(sql, (hashed_password.encode('utf-8'), username.encode('utf-8'),))
                 database.commit()
-                title = "PSS | AccountSettings"
+                title = "PSS | ChangePassword"
                 logging.info("Complete change password")
-                self.render('accountsettings.html',
-                            title=title, message="パスワードを変更しました")
+                self.render('changepassword.html', title=title, message="パスワードを変更しました")
             # 認証失敗時(パスワードが違う場合)
             else:
                 logging.info("AuthError")
-                title = "PSS | AccountSettings"
-                self.render('accountsettings.html', title=title,
-                            message="現在のパスワードが違います")
+                title = "PSS | ChangePassword"
+                self.render('changepassword.html', title=title, message="現在のパスワードが違います")
             c.close()
 
 
@@ -258,8 +260,7 @@ class Comment(web.RequestHandler):  # コメント入力フォーム
             else:
                 token = cl
                 message = "正しく入力してください"
-                self.render('comment.html', title=title,
-                            message=message, token=token)
+                self.render('comment.html', title=title, message=message, token=token)
 
     def get(self):
         cl = self.get_query_argument("cl", default=0)
@@ -305,7 +306,7 @@ def webapp_main():
          (r"/Comment", Comment),
          (r"/DashBoard", DashBoard),
          (r"/CommentHistory", CommentHistory),
-         (r"/AccountSettings", AccountSettings),
+         (r"/ChangePassword", ChangePassword),
          (r"/ClientList", ClientList),
          (r'/(favicon.ico)', tornado.web.StaticFileHandler, {"url": "/static/favicon.png"})],
         template_path=os.path.join(BASE_DIR, 'Web/templates'),
@@ -338,11 +339,9 @@ if __name__ == '__main__':
     manager = Manager()
     commentbody = manager.list()
     # データベースの設定(ユーザー名・パスワード)読み込み
-    yaml_dict = yaml.load(open('Web/secret.yaml').read(),
-                          Loader=yaml.SafeLoader)
+    yaml_dict = yaml.load(open('Web/secret.yaml').read(), Loader=yaml.SafeLoader)
     user_name, DBPASS = yaml_dict['username'], yaml_dict['password']
-    # タイムゾーンをJSTに設定
-    JST = timezone(timedelta(hours=+9), 'JST')
+    host, port, db = yaml_dict['host'], int(yaml_dict['port']), yaml_dict['db']
     # SocketのSSL化
     context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
     context.load_cert_chain(
@@ -354,18 +353,19 @@ if __name__ == '__main__':
     database = mydb.connect(
         user=user_name,
         passwd=DBPASS,
-        host='mysql',
-        port=3306,
-        db='PSS'
+        host=host,
+        port=port,
+        db=db,
+        charset='utf8mb4'
     )
     logging.basicConfig(filename='/log/server.log', level=logging.DEBUG)
     # Webアプリケーションスレッド
-    thread1 = Thread(target=webapp_main)
+    web_app_thread = Thread(target=webapp_main)
     # ソケット通信スレッド
-    thread2 = Thread(target=connect_socket)
-    thread3 = Thread(target=db_ping)
-    thread4 = Thread(target=loop_handler)
-    thread1.start()
-    thread2.start()
-    thread3.start()
-    thread4.start()
+    connect_socket_thread = Thread(target=connect_socket)
+    ping_db_thread = Thread(target=db_ping)
+    send_comment_thread = Thread(target=loop_handler)
+    web_app_thread.start()
+    connect_socket_thread.start()
+    ping_db_thread.start()
+    send_comment_thread.start()
