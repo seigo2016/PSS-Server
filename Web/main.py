@@ -208,6 +208,7 @@ class ChangePassword(BaseHandler):
         title = "PSS | ChangePassword"
         self.render('changepassword.html', title=title, message="")
 
+    @web.authenticated
     def post(self):
         logging.debug("xsrf_cookie:" + self.get_argument("_xsrf", None))
         self.check_xsrf_cookie()
@@ -236,6 +237,38 @@ class ChangePassword(BaseHandler):
                 title = "PSS | ChangePassword"
                 self.render('changepassword.html', title=title, message="現在のパスワードが違います")
             c.close()
+
+class CreateAccount(BaseHandler):
+    def get(self):
+        title = "PSS | CreateAccount"
+        self.render('createaccount.html', title=title, message="")
+
+    def post(self):
+        logging.debug("xsrf_cookie:" + self.get_argument("_xsrf", None))
+        self.check_xsrf_cookie()
+        username = self.get_argument("username")
+        user_password = self.get_argument("new_password")
+        if len(user_password) and len(username):
+            c = database.cursor()
+            sql = "SELECT * FROM users WHERE name = %s"
+            c.execute(sql, (username.encode('utf-8'),))
+            userdata = c.fetchall()
+            if len(userdata):
+                title = "PSS | CreateAccount"
+                self.render('createaccount.html', title=title, message="正しく入力してください")
+            else:
+                sql = "INSERT INTO users (name,pass) values(%s,%s)"
+                salt = bcrypt.gensalt(rounds=10, prefix=b'2a')
+                hashed_password = bcrypt.hashpw(user_password.encode(), salt).decode()
+                c.execute(sql, (username.encode('utf-8'), hashed_password.encode('utf-8')))
+                database.commit()
+                c.close()
+                title = "PSS | Create Account"
+                logging.info("Complete create account")
+                self.render('createaccount.html', title=title, message="アカウントが作成されました")
+        else:
+            title = "PSS | CreateAccount"
+            self.render('createaccount.html', title=title, message="正しく入力してください")
 
 
 class DashBoard(BaseHandler):
@@ -308,6 +341,7 @@ def webapp_main():
          (r"/CommentHistory", CommentHistory),
          (r"/ChangePassword", ChangePassword),
          (r"/ClientList", ClientList),
+#         (r"/CreateAccount", CreateAccount),
          (r'/(favicon.ico)', tornado.web.StaticFileHandler, {"url": "/static/favicon.png"})],
         template_path=os.path.join(BASE_DIR, 'Web/templates'),
         cookie_secret=token,
